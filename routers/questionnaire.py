@@ -24,20 +24,23 @@ def create_questionnaire(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_doctor)
 ):
+    """Create a new questionnaire (Doctor only)"""
     new_questionnaire = Questionnaire(**questionnaire_data.dict())
     db.add(new_questionnaire)
     db.commit()
     db.refresh(new_questionnaire)
-    
     return new_questionnaire
+
 
 @router.get("/", response_model=List[QuestionnaireSchema])
 def get_questionnaires(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Get all questionnaires (Both patient and doctor can access)"""
     questionnaires = db.query(Questionnaire).all()
     return questionnaires
+
 
 @router.get("/{questionnaire_id}", response_model=QuestionnaireSchema)
 def get_questionnaire(
@@ -45,6 +48,7 @@ def get_questionnaire(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Get a specific questionnaire by ID"""
     questionnaire = db.query(Questionnaire).filter(
         Questionnaire.id == questionnaire_id
     ).first()
@@ -57,6 +61,7 @@ def get_questionnaire(
     
     return questionnaire
 
+
 @router.put("/{questionnaire_id}", response_model=QuestionnaireSchema)
 def update_questionnaire(
     questionnaire_id: int,
@@ -64,6 +69,7 @@ def update_questionnaire(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_doctor)
 ):
+    """Update a questionnaire (Doctor only)"""
     questionnaire = db.query(Questionnaire).filter(
         Questionnaire.id == questionnaire_id
     ).first()
@@ -79,8 +85,8 @@ def update_questionnaire(
     
     db.commit()
     db.refresh(questionnaire)
-    
     return questionnaire
+
 
 @router.delete("/{questionnaire_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_questionnaire(
@@ -88,6 +94,7 @@ def delete_questionnaire(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_doctor)
 ):
+    """Delete a questionnaire (Doctor only)"""
     questionnaire = db.query(Questionnaire).filter(
         Questionnaire.id == questionnaire_id
     ).first()
@@ -100,8 +107,8 @@ def delete_questionnaire(
     
     db.delete(questionnaire)
     db.commit()
-    
     return None
+
 
 # Questionnaire Responses
 
@@ -112,6 +119,7 @@ def submit_response(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Submit a questionnaire response"""
     # Verify questionnaire exists
     questionnaire = db.query(Questionnaire).filter(
         Questionnaire.id == questionnaire_id
@@ -135,18 +143,27 @@ def submit_response(
         )
     
     # If current user is patient, ensure they're responding for themselves
-    if current_user.role == "patient" and patient.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Can only submit responses for yourself"
-        )
+    if current_user.role == "patient":
+        # Find patient record associated with this user
+        user_patient = db.query(Patient).filter(Patient.user_id == current_user.id).first()
+        if not user_patient or user_patient.id != response_data.patient_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can only submit responses for yourself"
+            )
     
-    new_response = QuestionnaireResponse(**response_data.dict())
+    # Create response with questionnaire_id from URL
+    new_response = QuestionnaireResponse(
+        questionnaire_id=questionnaire_id,
+        patient_id=response_data.patient_id,
+        responses=response_data.responses
+    )
     db.add(new_response)
     db.commit()
     db.refresh(new_response)
     
     return new_response
+
 
 @router.get("/responses/patient/{patient_id}", response_model=List[QuestionnaireResponseSchema])
 def get_patient_responses(
@@ -154,7 +171,8 @@ def get_patient_responses(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Verify access
+    """Get all responses for a specific patient"""
+    # Verify patient exists
     patient = db.query(Patient).filter(Patient.id == patient_id).first()
     if not patient:
         raise HTTPException(
@@ -162,11 +180,14 @@ def get_patient_responses(
             detail="Patient not found"
         )
     
-    if current_user.role == "patient" and patient.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view these responses"
-        )
+    # Authorization check
+    if current_user.role == "patient":
+        user_patient = db.query(Patient).filter(Patient.user_id == current_user.id).first()
+        if not user_patient or user_patient.id != patient_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to view these responses"
+            )
     
     responses = db.query(QuestionnaireResponse).filter(
         QuestionnaireResponse.patient_id == patient_id
@@ -174,12 +195,14 @@ def get_patient_responses(
     
     return responses
 
+
 @router.get("/responses/{response_id}", response_model=QuestionnaireResponseSchema)
 def get_response(
     response_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Get a specific response by ID"""
     response = db.query(QuestionnaireResponse).filter(
         QuestionnaireResponse.id == response_id
     ).first()
@@ -190,10 +213,10 @@ def get_response(
             detail="Response not found"
         )
     
-    # Verify access
+    # Authorization check for patients
     if current_user.role == "patient":
-        patient = db.query(Patient).filter(Patient.user_id == current_user.id).first()
-        if not patient or response.patient_id != patient.id:
+        user_patient = db.query(Patient).filter(Patient.user_id == current_user.id).first()
+        if not user_patient or response.patient_id != user_patient.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to view this response"

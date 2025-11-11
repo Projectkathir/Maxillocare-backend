@@ -9,5 +9,8 @@ pydantic[email]
 pydantic-settings
 email-validator
 bcrypt==4.1.2
+psycopg2-binary
+pillow
+
 
 
