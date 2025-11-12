@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, 
 from datetime import datetime
 from database import Base
 
+
 class HealingImage(Base):
     __tablename__ = "healing_images"
     
@@ -12,3 +13,7 @@ class HealingImage(Base):
     healing_percentage = Column(Float, nullable=True)
     ai_remarks = Column(Text, nullable=True)
     analyzed = Column(Boolean, default=False)
+    
+    # NEW FIELDS - Medical classification and recommendations
+    fracture_classification = Column(String, nullable=True)
+    recommended_actions = Column(Text, nullable=True)
