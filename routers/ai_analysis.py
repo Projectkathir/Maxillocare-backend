@@ -33,7 +33,7 @@ def analyze_image(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Analyze medical image using Google Gemini Vision API
+    Analyze medical image with AI-powered diagnostics
     
     **Supported Image Types:**
     - Panoramic X-rays (OPG)

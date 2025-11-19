@@ -1,4 +1,3 @@
-
 """
 Gemini AI Service for Maxillocare Dental Image Analysis
 Specialized for maxillofacial surgery follow-up and dental diagnostics
@@ -166,13 +165,15 @@ For Dental Pathology:
 If uncertain about diagnosis, indicate "further clinical correlation required" in clinical_notes.
 Always err on the side of caution in severity assessment.
 
-Analyze the uploaded image now and provide your assessment in the exact JSON format above.
+CRITICAL: You MUST respond with ONLY valid JSON. Do not include explanatory text before or after the JSON. If using code blocks, use the format: ``````
+
+Analyze the uploaded image now.
 """
     
     def _parse_analysis_response(self, analysis_text: str) -> Dict:
         """
         Parse Gemini response and extract structured data
-        Handles both JSON and markdown-wrapped JSON responses
+        Handles multiple response formats: pure JSON, markdown-wrapped JSON, or plain text
         
         Args:
             analysis_text: Raw text response from Gemini
@@ -182,13 +183,29 @@ Analyze the uploaded image now and provide your assessment in the exact JSON for
         """
         
         try:
-            # Try to extract JSON from markdown code blocks
+            logger.info(f"📝 Raw Gemini response length: {len(analysis_text)} characters")
+            
+            # Strategy 1: Extract JSON from markdown code blocks with json tag (``````)
             json_match = re.search(r'``````', analysis_text, re.DOTALL)
             if json_match:
+                logger.info("✅ Found JSON in markdown code block (```
                 analysis_json = json.loads(json_match.group(1))
             else:
-                # Try direct JSON parse
-                analysis_json = json.loads(analysis_text)
+                # Strategy 2: Extract JSON from generic code blocks (``` ... ```
+                json_match = re.search(r'```\s*\n(.*?)\n```
+                if json_match:
+                    logger.info("✅ Found JSON in generic code block (```)")
+                    analysis_json = json.loads(json_match.group(1))
+                else:
+                    # Strategy 3: Find JSON object anywhere in text (searching for { ... })
+                    json_match = re.search(r'\{.*\}', analysis_text, re.DOTALL)
+                    if json_match:
+                        logger.info("✅ Found JSON object in text")
+                        analysis_json = json.loads(json_match.group(0))
+                    else:
+                        # Strategy 4: Direct JSON parse (if response is pure JSON)
+                        logger.info("⚠️ Attempting direct JSON parse")
+                        analysis_json = json.loads(analysis_text)
             
             # Validate and sanitize healing percentage
             healing_pct = float(analysis_json.get('healing_percentage', 50.0))
@@ -221,22 +238,42 @@ CLINICAL NOTES:
                 'recommended_actions': actions_text
             }
             
-            logger.info(f"📊 Parsed analysis - Healing: {healing_pct}%, Severity: {analysis_json.get('severity', 'N/A')}")
+            logger.info(f"✅ Successfully parsed analysis - Healing: {healing_pct}%, Severity: {analysis_json.get('severity', 'N/A')}")
             return result
             
         except json.JSONDecodeError as e:
-            logger.warning(f"⚠️ Failed to parse JSON response: {e}")
-            # Fallback: use raw text as clinical remarks
-            return {
-                'healing_percentage': 50.0,
-                'fracture_classification': 'Manual review required',
-                'ai_remarks': f"AI Analysis Output:\n{analysis_text[:800]}",  # Truncate long responses
-                'recommended_actions': '• Clinical evaluation recommended\n• Manual review of AI output required'
-            }
+            logger.error(f"❌ JSON parsing failed: {e}")
+            logger.error(f"📄 Response preview (first 500 chars): {analysis_text[:500]}")
+            
+            # Enhanced fallback: Extract useful info from plain text
+            return self._fallback_text_parsing(analysis_text)
         
         except Exception as e:
-            logger.error(f"❌ Error parsing analysis: {e}")
-            raise
+            logger.error(f"❌ Unexpected error parsing analysis: {e}")
+            return self._fallback_text_parsing(analysis_text)
+    
+    def _fallback_text_parsing(self, analysis_text: str) -> Dict:
+        """
+        Fallback parser for when JSON extraction fails
+        Attempts to extract useful information from plain text responses
+        """
+        logger.warning("⚠️ Using fallback text parsing")
+        
+        # Try to extract percentage if mentioned in text
+        percentage_match = re.search(r'(\d+(?:\.\d+)?)\s*%?\s*heal', analysis_text, re.IGNORECASE)
+        healing_pct = float(percentage_match.group(1)) if percentage_match else 50.0
+        healing_pct = max(0.0, min(100.0, healing_pct))
+        
+        # Try to extract diagnosis if mentioned
+        diagnosis_match = re.search(r'(?:diagnosis|condition|finding):\s*([^\n.]+)', analysis_text, re.IGNORECASE)
+        diagnosis = diagnosis_match.group(1).strip() if diagnosis_match else 'Manual review required'
+        
+        return {
+            'healing_percentage': healing_pct,
+            'fracture_classification': diagnosis,
+            'ai_remarks': f"AI Analysis (Text Format):\n\n{analysis_text[:800]}",
+            'recommended_actions': '• Clinical evaluation recommended\n• Review full AI text output for detailed findings'
+        }
 
 
 # Singleton instance for reuse across requests
