@@ -17,5 +17,6 @@ UPLOAD_DIR = "uploads/patient_images"
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
-# AI Service (for future integration)
-AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:5000")
+# Gemini AI Configuration (NEW)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = "gemini-1.5-flash"  # Free tier model with vision support

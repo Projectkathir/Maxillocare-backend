@@ -16,8 +16,10 @@ build/
 *.sqlite3
 database.db
 
-# Environment variables
+# Environment variables (CRITICAL - Prevents API key exposure)
 .env
+.env.*
+*.env
 .env.local
 .env.*.local
 
@@ -32,8 +34,9 @@ database.db
 Thumbs.db
 desktop.ini
 
-# Uploads (local only)
+# Uploads (local only - Render has its own storage)
 uploads/
+uploads/*
 
 # Testing
 .pytest_cache/
@@ -42,6 +45,7 @@ htmlcov/
 
 # Logs
 *.log
+logs/
 
 # Temporary files
 *.tmp
@@ -51,3 +55,14 @@ htmlcov/
 # Backup files
 *.bak
 *.backup
+
+# Gemini AI Service (NEW - Security)
+google-credentials.json
+service-account.json
+
+# Render deployment files (optional)
+.render/
+
+# Local development files
+*.local
+local_settings.py
