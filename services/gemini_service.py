@@ -165,7 +165,7 @@ For Dental Pathology:
 If uncertain about diagnosis, indicate "further clinical correlation required" in clinical_notes.
 Always err on the side of caution in severity assessment.
 
-CRITICAL: You MUST respond with ONLY valid JSON. Do not include explanatory text before or after the JSON. If using code blocks, use the format: ``````
+CRITICAL: You MUST respond with ONLY valid JSON. Do not include explanatory text before or after the JSON.
 
 Analyze the uploaded image now.
 """
@@ -185,25 +185,25 @@ Analyze the uploaded image now.
         try:
             logger.info(f"📝 Raw Gemini response length: {len(analysis_text)} characters")
             
-            # Strategy 1: Extract JSON from markdown code blocks with json tag (``````)
+            # Strategy 1: Extract JSON from markdown code blocks with json tag
             json_match = re.search(r'``````', analysis_text, re.DOTALL)
             if json_match:
-                logger.info("✅ Found JSON in markdown code block (```
+                logger.info("✅ Found JSON in markdown code block with json tag")
                 analysis_json = json.loads(json_match.group(1))
             else:
-                # Strategy 2: Extract JSON from generic code blocks (``` ... ```
-                json_match = re.search(r'```\s*\n(.*?)\n```
+                # Strategy 2: Extract JSON from generic code blocks
+                json_match = re.search(r'``````', analysis_text, re.DOTALL)
                 if json_match:
-                    logger.info("✅ Found JSON in generic code block (```)")
+                    logger.info("✅ Found JSON in generic code block")
                     analysis_json = json.loads(json_match.group(1))
                 else:
-                    # Strategy 3: Find JSON object anywhere in text (searching for { ... })
+                    # Strategy 3: Find JSON object anywhere in text
                     json_match = re.search(r'\{.*\}', analysis_text, re.DOTALL)
                     if json_match:
                         logger.info("✅ Found JSON object in text")
                         analysis_json = json.loads(json_match.group(0))
                     else:
-                        # Strategy 4: Direct JSON parse (if response is pure JSON)
+                        # Strategy 4: Direct JSON parse
                         logger.info("⚠️ Attempting direct JSON parse")
                         analysis_json = json.loads(analysis_text)
             
