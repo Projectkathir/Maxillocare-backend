@@ -114,6 +114,7 @@ Analyze this dental/oral image carefully and provide a detailed clinical assessm
 2. Use precise medical terminology
 3. Prioritize patient safety in recommendations
 4. If image quality is poor, note it in clinical_notes
+5. ALWAYS provide a numeric healing_percentage value (0-100), never null
 
 **REQUIRED JSON FORMAT:**
 {
@@ -154,6 +155,11 @@ For Dental Pathology:
 - Periapical lesions
 - TMJ abnormalities (if visible)
 
+For Normal/Healthy Images:
+- healing_percentage: 100.0 (healthy state)
+- severity: "normal"
+- Note absence of pathology
+
 **Severity Classification:**
 - Normal: No pathology detected
 - Mild: Minor findings, routine follow-up
@@ -165,7 +171,7 @@ For Dental Pathology:
 If uncertain about diagnosis, indicate "further clinical correlation required" in clinical_notes.
 Always err on the side of caution in severity assessment.
 
-CRITICAL: You MUST respond with ONLY valid JSON. Do not include explanatory text before or after the JSON.
+CRITICAL: You MUST respond with ONLY valid JSON. Do not include explanatory text before or after the JSON. Ensure healing_percentage is always a number, never null.
 
 Analyze the uploaded image now.
 """
@@ -207,38 +213,62 @@ Analyze the uploaded image now.
                         logger.info("⚠️ Attempting direct JSON parse")
                         analysis_json = json.loads(analysis_text)
             
-            # Validate and sanitize healing percentage
-            healing_pct = float(analysis_json.get('healing_percentage', 50.0))
-            healing_pct = max(0.0, min(100.0, healing_pct))  # Clamp to 0-100
+            # Validate and sanitize healing percentage (ROBUST NULL/NONE HANDLING)
+            healing_raw = analysis_json.get('healing_percentage')
+            try:
+                if healing_raw is None or healing_raw == '' or healing_raw == 'null':
+                    logger.warning("⚠️ Healing percentage was null/empty, using default 50.0%")
+                    healing_pct = 50.0
+                else:
+                    healing_pct = float(healing_raw)
+                    if healing_pct < 0 or healing_pct > 100:
+                        logger.warning(f"⚠️ Healing percentage {healing_pct}% out of range, clamping to 0-100")
+                    healing_pct = max(0.0, min(100.0, healing_pct))  # Clamp to 0-100
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ Invalid healing percentage value '{healing_raw}': {e}, using default 50.0%")
+                healing_pct = 50.0
             
-            # Format detailed findings as bullet points
-            findings = analysis_json.get('detailed_findings', ['Analysis completed'])
-            findings_text = '\n'.join([f"• {finding}" for finding in findings[:5]])  # Limit to 5
+            # Validate and format detailed findings (NULL-SAFE)
+            findings = analysis_json.get('detailed_findings')
+            if not findings or not isinstance(findings, list) or len(findings) == 0:
+                logger.warning("⚠️ No detailed findings provided, using default")
+                findings = ['Analysis completed - see clinical notes for details']
+            findings_text = '\n'.join([f"• {str(finding)}" for finding in findings[:5] if finding])  # Limit to 5
             
-            # Format recommended actions
-            actions = analysis_json.get('recommended_actions', ['Routine follow-up recommended'])
-            actions_text = '\n'.join([f"• {action}" for action in actions[:5]])
+            # Validate and format recommended actions (NULL-SAFE)
+            actions = analysis_json.get('recommended_actions')
+            if not actions or not isinstance(actions, list) or len(actions) == 0:
+                logger.warning("⚠️ No recommended actions provided, using default")
+                actions = ['Routine follow-up recommended', 'Consult with healthcare provider']
+            actions_text = '\n'.join([f"• {str(action)}" for action in actions[:5] if action])
+            
+            # Safely extract text fields with defaults
+            primary_diag = analysis_json.get('primary_diagnosis') or 'Assessment completed'
+            severity_raw = analysis_json.get('severity')
+            severity = str(severity_raw).upper() if severity_raw else 'UNKNOWN'
+            clinical_notes = analysis_json.get('clinical_notes') or 'No additional notes provided'
+            fracture_class = analysis_json.get('fracture_classification') or 'Analysis completed'
             
             # Compile AI remarks
-            ai_remarks = f"""PRIMARY DIAGNOSIS: {analysis_json.get('primary_diagnosis', 'Assessment completed')}
+            ai_remarks = f"""PRIMARY DIAGNOSIS: {primary_diag}
 
-SEVERITY: {analysis_json.get('severity', 'unknown').upper()}
+SEVERITY: {severity}
 
 KEY FINDINGS:
 {findings_text}
 
 CLINICAL NOTES:
-{analysis_json.get('clinical_notes', 'No additional notes')}"""
+{clinical_notes}"""
             
             # Format result for database
             result = {
                 'healing_percentage': healing_pct,
-                'fracture_classification': analysis_json.get('fracture_classification', 'Analysis completed'),
+                'fracture_classification': fracture_class,
                 'ai_remarks': ai_remarks,
                 'recommended_actions': actions_text
             }
             
-            logger.info(f"✅ Successfully parsed analysis - Healing: {healing_pct}%, Severity: {analysis_json.get('severity', 'N/A')}")
+            logger.info(f"✅ Successfully parsed analysis - Healing: {healing_pct}%, Severity: {severity}")
             return result
             
         except json.JSONDecodeError as e:
@@ -250,6 +280,7 @@ CLINICAL NOTES:
         
         except Exception as e:
             logger.error(f"❌ Unexpected error parsing analysis: {e}")
+            logger.error(f"📄 Response content (first 1000 chars): {analysis_text[:1000]}")
             return self._fallback_text_parsing(analysis_text)
     
     def _fallback_text_parsing(self, analysis_text: str) -> Dict:
@@ -257,22 +288,31 @@ CLINICAL NOTES:
         Fallback parser for when JSON extraction fails
         Attempts to extract useful information from plain text responses
         """
-        logger.warning("⚠️ Using fallback text parsing")
+        logger.warning("⚠️ Using fallback text parsing - Gemini response was not valid JSON")
         
         # Try to extract percentage if mentioned in text
         percentage_match = re.search(r'(\d+(?:\.\d+)?)\s*%?\s*heal', analysis_text, re.IGNORECASE)
-        healing_pct = float(percentage_match.group(1)) if percentage_match else 50.0
-        healing_pct = max(0.0, min(100.0, healing_pct))
+        if percentage_match:
+            try:
+                healing_pct = float(percentage_match.group(1))
+                healing_pct = max(0.0, min(100.0, healing_pct))
+                logger.info(f"✅ Extracted healing percentage from text: {healing_pct}%")
+            except ValueError:
+                healing_pct = 50.0
+        else:
+            healing_pct = 50.0
+            logger.warning("⚠️ No healing percentage found in text, using default 50.0%")
         
         # Try to extract diagnosis if mentioned
         diagnosis_match = re.search(r'(?:diagnosis|condition|finding):\s*([^\n.]+)', analysis_text, re.IGNORECASE)
         diagnosis = diagnosis_match.group(1).strip() if diagnosis_match else 'Manual review required'
         
+        # Return fallback result
         return {
             'healing_percentage': healing_pct,
             'fracture_classification': diagnosis,
             'ai_remarks': f"AI Analysis (Text Format):\n\n{analysis_text[:800]}",
-            'recommended_actions': '• Clinical evaluation recommended\n• Review full AI text output for detailed findings'
+            'recommended_actions': '• Clinical evaluation recommended\n• Manual review of AI output required\n• Contact healthcare provider for interpretation'
         }
 
 
