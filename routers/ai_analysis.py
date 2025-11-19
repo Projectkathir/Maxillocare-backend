@@ -43,7 +43,6 @@ def analyze_image(
     - Post-operative healing images
     
     **Returns:**
-    - Healing percentage (0-100%)
     - Fracture classification (if applicable)
     - Clinical observations and findings
     - Evidence-based treatment recommendations
@@ -93,14 +92,14 @@ def analyze_image(
         print(f"🔍 Starting AI analysis for image ID: {image_id}")
         analysis_result = gemini_service.analyze_dental_image(image.image_path)
         
-        # Update image record with AI results
+        # Update image record with AI results (still store healing_percentage in DB)
         image.healing_percentage = analysis_result['healing_percentage']
         image.ai_remarks = analysis_result['ai_remarks']
         image.fracture_classification = analysis_result['fracture_classification']
         image.recommended_actions = analysis_result['recommended_actions']
         image.analyzed = True
         
-        # Update patient's current healing percentage
+        # Update patient's current healing percentage (internal tracking)
         patient.current_healing_percentage = analysis_result['healing_percentage']
         
         # Commit to database
@@ -109,10 +108,10 @@ def analyze_image(
         
         print(f"✅ Analysis completed - Healing: {image.healing_percentage}%")
         
-        # Return analysis results
+        # Return analysis results (WITHOUT healing_percentage in response)
         return AIAnalysisResult(
             image_id=image.id,
-            healing_percentage=image.healing_percentage,
+            # healing_percentage=image.healing_percentage,  ← REMOVED
             ai_remarks=image.ai_remarks,
             fracture_classification=image.fracture_classification,
             recommended_actions=image.recommended_actions,
@@ -144,7 +143,7 @@ def get_analysis_results(
     """
     Retrieve AI analysis results for a specific image
     
-    **Returns:** Complete analysis including healing percentage, classification, and recommendations
+    **Returns:** Complete analysis including classification and recommendations
     """
     
     image = db.query(HealingImage).filter(HealingImage.id == image_id).first()
@@ -170,9 +169,10 @@ def get_analysis_results(
                 detail="Not authorized to view this analysis"
             )
     
+    # Return analysis results (WITHOUT healing_percentage in response)
     return AIAnalysisResult(
         image_id=image.id,
-        healing_percentage=image.healing_percentage,
+        # healing_percentage=image.healing_percentage,  ← REMOVED
         ai_remarks=image.ai_remarks,
         fracture_classification=image.fracture_classification,
         recommended_actions=image.recommended_actions,

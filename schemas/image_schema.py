@@ -17,8 +17,8 @@ class HealingImage(HealingImageBase):
     upload_date: datetime
     healing_percentage: Optional[float] = None
     ai_remarks: Optional[str] = None
-    fracture_classification: Optional[str] = None  # NEW
-    recommended_actions: Optional[str] = None  # NEW
+    fracture_classification: Optional[str] = None
+    recommended_actions: Optional[str] = None
     analyzed: bool
     
     class Config:
@@ -27,8 +27,8 @@ class HealingImage(HealingImageBase):
 
 class AIAnalysisResult(BaseModel):
     image_id: int
-    healing_percentage: float
+    # healing_percentage: float  ← REMOVED (users won't see this)
     ai_remarks: str
-    fracture_classification: str  # NEW
-    recommended_actions: str  # NEW
+    fracture_classification: str
+    recommended_actions: str
     analyzed_at: datetime
