@@ -10,13 +10,16 @@ from schemas.questionnaire_schema import (
     QuestionnaireCreate,
     Questionnaire as QuestionnaireSchema,
     QuestionnaireResponseCreate,
-    QuestionnaireResponse as QuestionnaireResponseSchema
+    QuestionnaireResponse as QuestionnaireResponseSchema,
+    QuestionnaireResponseDetailed  # NEW IMPORT
 )
 from utils.security import get_current_user, get_current_doctor
 
 router = APIRouter()
 
-# Questionnaire Management (Doctor only)
+# ============================================================================
+# QUESTIONNAIRE MANAGEMENT (Doctor only)
+# ============================================================================
 
 @router.post("/", response_model=QuestionnaireSchema, status_code=status.HTTP_201_CREATED)
 def create_questionnaire(
@@ -110,7 +113,9 @@ def delete_questionnaire(
     return None
 
 
-# Questionnaire Responses
+# ============================================================================
+# QUESTIONNAIRE RESPONSES - Patient Submission
+# ============================================================================
 
 @router.post("/{questionnaire_id}/respond", response_model=QuestionnaireResponseSchema, status_code=status.HTTP_201_CREATED)
 def submit_response(
@@ -165,13 +170,17 @@ def submit_response(
     return new_response
 
 
+# ============================================================================
+# BASIC RESPONSE RETRIEVAL (Original endpoints)
+# ============================================================================
+
 @router.get("/responses/patient/{patient_id}", response_model=List[QuestionnaireResponseSchema])
 def get_patient_responses(
     patient_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all responses for a specific patient"""
+    """Get all responses for a specific patient (basic format)"""
     # Verify patient exists
     patient = db.query(Patient).filter(Patient.id == patient_id).first()
     if not patient:
@@ -223,3 +232,151 @@ def get_response(
             )
     
     return response
+
+
+# ============================================================================
+# NEW ENDPOINTS - DETAILED RESPONSES FOR DOCTORS
+# ============================================================================
+
+@router.get(
+    "/responses/patient/{patient_id}/detailed",
+    response_model=List[QuestionnaireResponseDetailed],
+    summary="Get detailed questionnaire responses for a patient (Doctor view)",
+    tags=["Doctor - Patient Responses"]
+)
+def get_patient_responses_detailed(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_doctor)  # Only doctors can access
+):
+    """
+    📋 **Get all questionnaire responses for a specific patient WITH question details**
+    
+    **This endpoint is designed specifically for doctors to review patient answers.**
+    
+    **Returns:**
+    - ✅ Questionnaire title and type
+    - ✅ All original questions
+    - ✅ Patient's answers matched to questions
+    - ✅ Patient's name
+    - ✅ Submission timestamp
+    
+    **Authorization:** Doctors only
+    
+    **Use Case:** Doctor clicks on a patient to see all their questionnaire responses
+    """
+    
+    # 1. Verify patient exists
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient with ID {patient_id} not found"
+        )
+    
+    # 2. Get patient's user info (for name)
+    patient_user = db.query(User).filter(User.id == patient.user_id).first()
+    patient_name = patient_user.full_name if patient_user else "Unknown Patient"
+    
+    # 3. Get all responses for this patient with questionnaire details (JOIN)
+    responses = (
+        db.query(QuestionnaireResponse, Questionnaire)
+        .join(Questionnaire, QuestionnaireResponse.questionnaire_id == Questionnaire.id)
+        .filter(QuestionnaireResponse.patient_id == patient_id)
+        .order_by(QuestionnaireResponse.submitted_at.desc())  # Most recent first
+        .all()
+    )
+    
+    if not responses:
+        return []  # Return empty list if patient hasn't answered any questionnaires
+    
+    # 4. Format the response data
+    detailed_responses = []
+    for response, questionnaire in responses:
+        detailed_responses.append({
+            "response_id": response.id,
+            "patient_id": patient_id,
+            "patient_name": patient_name,
+            "questionnaire_id": questionnaire.id,
+            "questionnaire_title": questionnaire.title,
+            "questionnaire_type": questionnaire.type,
+            "questions": questionnaire.questions,  # Original questions
+            "responses": response.responses,  # Patient's answers
+            "submitted_at": response.submitted_at
+        })
+    
+    return detailed_responses
+
+
+@router.get(
+    "/responses/my-patients",
+    response_model=List[QuestionnaireResponseDetailed],
+    summary="Get all questionnaire responses for doctor's patients",
+    tags=["Doctor - Patient Responses"]
+)
+def get_my_patients_responses(
+    questionnaire_type: str = None,  # Optional filter by type (pre_surgery, post_surgery, etc.)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_doctor)
+):
+    """
+    📊 **Get all questionnaire responses for ALL patients assigned to this doctor**
+    
+    **This is useful for a dashboard view where doctors can see all their patients' responses.**
+    
+    **Returns:**
+    - ✅ All responses from all assigned patients
+    - ✅ Each response includes patient name, questions, and answers
+    - ✅ Sorted by most recent first
+    
+    **Optional Filter:**
+    - `questionnaire_type`: Filter by type (e.g., "pre_surgery", "post_surgery")
+    
+    **Authorization:** Doctors only
+    
+    **Use Case:** Doctor dashboard showing all patient responses at a glance
+    """
+    
+    # 1. Get all patients assigned to this doctor
+    my_patients = db.query(Patient).filter(Patient.doctor_id == current_user.id).all()
+    
+    if not my_patients:
+        return []  # No patients assigned yet
+    
+    patient_ids = [p.id for p in my_patients]
+    
+    # 2. Build query for responses
+    query = (
+        db.query(QuestionnaireResponse, Questionnaire, Patient, User)
+        .join(Questionnaire, QuestionnaireResponse.questionnaire_id == Questionnaire.id)
+        .join(Patient, QuestionnaireResponse.patient_id == Patient.id)
+        .join(User, Patient.user_id == User.id)
+        .filter(QuestionnaireResponse.patient_id.in_(patient_ids))
+    )
+    
+    # 3. Apply optional filter
+    if questionnaire_type:
+        query = query.filter(Questionnaire.type == questionnaire_type)
+    
+    # 4. Execute query and order results
+    responses = query.order_by(QuestionnaireResponse.submitted_at.desc()).all()
+    
+    if not responses:
+        return []  # No responses yet
+    
+    # 5. Format the response data
+    detailed_responses = []
+    for response, questionnaire, patient, user in responses:
+        detailed_responses.append({
+            "response_id": response.id,
+            "patient_id": patient.id,
+            "patient_name": user.full_name,
+            "questionnaire_id": questionnaire.id,
+            "questionnaire_title": questionnaire.title,
+            "questionnaire_type": questionnaire.type,
+            "questions": questionnaire.questions,
+            "responses": response.responses,
+            "submitted_at": response.submitted_at
+        })
+    
+    return detailed_responses
