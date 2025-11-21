@@ -16,7 +16,6 @@ from utils.security import get_current_user
 
 router = APIRouter()
 
-
 # -------------------------------------------
 # Create Appointment
 # -------------------------------------------
@@ -47,20 +46,23 @@ def create_appointment(
                 detail="Can only book appointments for yourself"
             )
         # Patients cannot set appointment status during booking
-        if appointment_data.status is not None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only doctors can set appointment status"
-            )
+        # REMOVED BUGGY LINE: if appointment_data.status is not None:
+        # AppointmentCreate doesn't have 'status' field, so we don't check it
+        # Status will default to "pending" in the database model
 
-    # Create new appointment
-    new_appointment = Appointment(**appointment_data.dict())
+    # Create new appointment - status will default to "pending" from model
+    new_appointment = Appointment(
+        patient_id=appointment_data.patient_id,
+        doctor_id=appointment_data.doctor_id,
+        appointment_date=appointment_data.appointment_date,
+        notes=appointment_data.notes
+        # status will automatically be set to "pending" by the model default
+    )
     db.add(new_appointment)
     db.commit()
     db.refresh(new_appointment)
 
     return new_appointment
-
 
 # -------------------------------------------
 # Delete Appointment
@@ -96,7 +98,6 @@ def delete_appointment(
 
     return None
 
-
 # -------------------------------------------
 # Get All Appointments
 # -------------------------------------------
@@ -120,7 +121,6 @@ def get_appointments(
         ).all()
 
     return appointments
-
 
 # -------------------------------------------
 # Get Appointment by ID
@@ -152,7 +152,6 @@ def get_appointment(
             )
 
     return appointment
-
 
 # -------------------------------------------
 # Update Appointment
